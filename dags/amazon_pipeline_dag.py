@@ -17,6 +17,7 @@ from src.validator import Validator
 from src.processor import Processor
 from src.backup_validator import BackupValidator
 from src.writer import Writer
+from src.quality_reporter import QualityReporter
 
 
 # Airflow container paths (match your Docker volume mount)
@@ -63,7 +64,12 @@ def validate_and_process(**context) -> None:
     if not input_file:
         raise ValueError("No input file path found in XCom.")
 
-    print(f"Starting pipeline for file: {input_file}")
+    print("\n" + "="*80)
+    print("STARTING PIPELINE")
+    print("="*80)
+    print(f"File: {os.path.basename(input_file)}")
+    print(f"Size: {os.path.getsize(input_file):,} bytes")
+    print("="*80 + "\n")
     
     os.makedirs(ERROR_DIR, exist_ok=True)
     os.makedirs(ARCHIVE_DIR, exist_ok=True)
@@ -72,12 +78,12 @@ def validate_and_process(**context) -> None:
     # 1) Reader
     reader = CSVReader()
     df = reader.read(input_file)
-    print(f"Read {len(df)} rows from {input_file}")
+    print(f"✓ Read {len(df)} rows from {input_file}")
 
     # 2) Validator
     validator = Validator(required_columns=REQUIRED_COLUMNS)
     issues = validator.validate(df)
-    print(f"Validation found {len(issues)} issue(s)")
+    print(f"✓ Validation: {len(issues)} issue(s) found")
 
     if issues:
         # Write validation log
@@ -94,12 +100,12 @@ def validate_and_process(**context) -> None:
     # 3) Processor
     processor = Processor(dedup_subset=["product_id"])
     df_clean = processor.process(df)
-    print(f"Processing complete: {len(df_clean)} rows after cleaning (down from {len(df)} rows)")
+    print(f"✓ Processing: {len(df_clean)} rows after cleaning ({len(df) - len(df_clean)} duplicates removed)")
 
     # 3.5) Backup Validator - validates the processed data
     backup_validator = BackupValidator()
     backup_issues = backup_validator.validate(df_clean)
-    print(f"Backup validation found {len(backup_issues)} issue(s)")
+    print(f"✓ Backup validation: {len(backup_issues)} issue(s) found")
 
     if backup_issues:
         # Write backup validation log
@@ -133,14 +139,50 @@ def validate_and_process(**context) -> None:
 
     out_name = os.path.basename(input_file).replace(".csv", "_clean.csv")
     writer_info = writer.write_all(df_clean, out_name)
+    print(f"✓ Writer: Saved locally and uploaded to Azure")
+
+    # 4.5) Generate Data Quality Report
+    quality_reporter = QualityReporter()
+    report_name = os.path.basename(input_file).replace(".csv", "_quality_report.txt")
+    report_path = quality_reporter.generate_report(
+        df_clean,
+        os.path.join(OUTPUT_DIR, report_name)
+    )
+    print(f"✓ Quality Report: Generated {report_path}")
 
     # 5) Archive input file after success
     archive_path = os.path.join(ARCHIVE_DIR, os.path.basename(input_file))
     shutil.move(input_file, archive_path)
-    print(f"SUCCESS: File archived to {archive_path}")
-
-    # Log info in task logs
-    print("Writer output:", writer_info)
+    
+    # ========================================================================
+    # PROCESSING SUMMARY - Shows up in Airflow logs
+    # ========================================================================
+    duplicates_removed = len(df) - len(df_clean)
+    null_ratings = df_clean["rating_num"].isna().sum()
+    null_rating_counts = df_clean["rating_count_num"].isna().sum()
+    products_with_discount = df_clean["has_discount_flag"].sum()
+    avg_discount = df_clean["discount_amount"].mean()
+    
+    print("\n" + "="*80)
+    print("PROCESSING SUMMARY")
+    print("="*80)
+    print(f"Input File:          {os.path.basename(input_file)}")
+    print(f"Input Rows:          {len(df):,}")
+    print(f"Output Rows:         {len(df_clean):,}")
+    print(f"Duplicates Removed:  {duplicates_removed}")
+    print(f"\nData Quality:")
+    print(f"  Null Ratings:         {null_ratings} ({null_ratings/len(df_clean)*100:.1f}%)") 
+    print(f"  Null Rating Counts:   {null_rating_counts} ({null_rating_counts/len(df_clean)*100:.1f}%)")
+    print(f"  Products w/ Discount: {products_with_discount} ({products_with_discount/len(df_clean)*100:.1f}%)")
+    print(f"  Avg Discount Amount:  ₹{avg_discount:.2f}")
+    print(f"\nOutput Locations:")
+    print(f"  Data:    {writer_info['local_path']}")
+    print(f"  Report:  {report_path}")
+    print(f"  Azure:   {writer_info['container']}/{writer_info['blob_name']}")
+    print(f"  Archive: {archive_path}")
+    print("="*80)
+    print("✓ Pipeline completed successfully!")
+    print("="*80 + "\n")
 
 
 # --- DAG and Task Definitions ---

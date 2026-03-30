@@ -54,6 +54,9 @@ class Processor:
         out["actual_price_num"] = out["actual_price"].apply(parse_money)
         out["discount_pct_num"] = out["discount_percentage"].apply(parse_percent)
         out["rating_count_num"] = out["rating_count"].apply(parse_int)
+        
+        # Parse rating to numeric (handles strings like '|', empty values, etc.)
+        out["rating_num"] = out["rating"].apply(lambda x: pd.to_numeric(x, errors='coerce'))
 
         # ========================================================================
         # STEP 4: CREATE NEW DERIVED COLUMNS (Requirement: at least 3)
@@ -93,8 +96,8 @@ class Processor:
         # Purpose: Weighted rating score (rating * log(rating_count + 1))
         # This gives more weight to products with more reviews
         out["price_quality_score"] = out.apply(
-            lambda row: row.get("rating", 0) * (1 + (row.get("rating_count_num", 0) / 100))
-            if pd.notna(row.get("rating")) and pd.notna(row.get("rating_count_num"))
+            lambda row: row.get("rating_num", 0) * (1 + (row.get("rating_count_num", 0) / 100))
+            if pd.notna(row.get("rating_num")) and pd.notna(row.get("rating_count_num"))
             else 0,
             axis=1
         )
