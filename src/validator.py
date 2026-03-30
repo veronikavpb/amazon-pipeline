@@ -70,17 +70,14 @@ VALIDATION_RULES = {
         ]
     },
     "rating_count": {
-        "description": "Number of ratings",
+        "description": "Number of ratings (optional)",
         "rules": [
-            {"type": "non_negative", "message": "rating_count must be >= 0"},
-            {"type": "integer", "message": "rating_count must be an integer"},
+            {"type": "non_negative", "message": "rating_count must be >= 0 if present"},
         ]
     },
     "review_content": {
-        "description": "Review text content (optional)",
-        "rules": [
-            {"type": "max_length", "value": 10000, "message": "review_content exceeds maximum length"},
-        ]
+        "description": "Review text content (optional, no length limit)",
+        "rules": []
     },
     "product_link": {
         "description": "URL to product page",
@@ -221,33 +218,29 @@ class Validator:
                                          clean_text(row.get("discount_percentage"))))
 
         # --- rating ---
+        # Allow non-numeric or missing values - processor will coerce to null
         r_txt = clean_text(row.get("rating"))
-        try:
-            r = float(r_txt) if r_txt else None
-        except ValueError:
-            r = None
-
-        if r is None or r < 0 or r > 5:
-            issues.append(ValidationIssue(i, "rating", "range", 
-                                         "rating must be between 0 and 5", r_txt))
+        if r_txt:  # Only validate if present and non-empty
+            try:
+                r = float(r_txt)
+                if r < 0 or r > 5:
+                    issues.append(ValidationIssue(i, "rating", "range", 
+                                                 "rating must be between 0 and 5", r_txt))
+            except ValueError:
+                # Invalid format - let processor handle it
+                pass
 
         # --- rating_count ---
+        # Optional field - only validate if present and parseable
         rc_raw = row.get("rating_count")
-        rc = parse_int(rc_raw)
-        if rc is None:
-            issues.append(ValidationIssue(i, "rating_count", "integer", 
-                                         "rating_count must be an integer", 
-                                         clean_text(rc_raw)))
-        elif rc < 0:
-            issues.append(ValidationIssue(i, "rating_count", "non_negative", 
-                                         "rating_count must be >= 0", str(rc)))
+        if pd.notna(rc_raw) and clean_text(rc_raw):  # Only check if not empty
+            rc = parse_int(rc_raw)
+            if rc is not None and rc < 0:
+                issues.append(ValidationIssue(i, "rating_count", "non_negative", 
+                                             "rating_count must be >= 0", str(rc)))
 
-        # --- review_content (optional field, only check length if present) ---
-        review = clean_text(row.get("review_content"))
-        if review and len(review) > 10000:
-            issues.append(ValidationIssue(i, "review_content", "max_length", 
-                                         "review_content exceeds maximum length", 
-                                         review[:50] + "..."))
+        # --- review_content (optional field, no validation needed) ---
+        # No length restrictions - accept any review content
 
         # --- product_link ---
         plink = clean_text(row.get("product_link"))

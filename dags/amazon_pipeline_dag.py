@@ -8,6 +8,7 @@ from datetime import datetime
 import pandas as pd
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from airflow.exceptions import AirflowSkipException
 import time
 from dotenv import load_dotenv
 
@@ -42,12 +43,18 @@ REQUIRED_COLUMNS = [
 
 
 def pick_latest_csv(**context) -> None:
+    """
+    Picks the most recently modified CSV file from the input directory.
+    """
     files = glob.glob(os.path.join(INPUT_DIR, "*.csv"))
     if not files:
-        raise FileNotFoundError("No CSV files found in input directory.")
+        print("No CSV files found (should have been caught by poll_for_csv)")
+        raise AirflowSkipException("No CSV files to process.")
 
     files.sort(key=os.path.getmtime)
     latest = files[-1]
+    print(f"Selected file: {latest}")
+    print(f"File size: {os.path.getsize(latest)} bytes")
     context["ti"].xcom_push(key="input_file", value=latest)
 
 
@@ -56,6 +63,8 @@ def validate_and_process(**context) -> None:
     if not input_file:
         raise ValueError("No input file path found in XCom.")
 
+    print(f"Starting pipeline for file: {input_file}")
+    
     os.makedirs(ERROR_DIR, exist_ok=True)
     os.makedirs(ARCHIVE_DIR, exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -63,10 +72,12 @@ def validate_and_process(**context) -> None:
     # 1) Reader
     reader = CSVReader()
     df = reader.read(input_file)
+    print(f"Read {len(df)} rows from {input_file}")
 
     # 2) Validator
     validator = Validator(required_columns=REQUIRED_COLUMNS)
     issues = validator.validate(df)
+    print(f"Validation found {len(issues)} issue(s)")
 
     if issues:
         # Write validation log
@@ -83,10 +94,12 @@ def validate_and_process(**context) -> None:
     # 3) Processor
     processor = Processor(dedup_subset=["product_id"])
     df_clean = processor.process(df)
+    print(f"Processing complete: {len(df_clean)} rows after cleaning (down from {len(df)} rows)")
 
     # 3.5) Backup Validator - validates the processed data
     backup_validator = BackupValidator()
     backup_issues = backup_validator.validate(df_clean)
+    print(f"Backup validation found {len(backup_issues)} issue(s)")
 
     if backup_issues:
         # Write backup validation log
@@ -122,7 +135,9 @@ def validate_and_process(**context) -> None:
     writer_info = writer.write_all(df_clean, out_name)
 
     # 5) Archive input file after success
-    shutil.move(input_file, os.path.join(ARCHIVE_DIR, os.path.basename(input_file)))
+    archive_path = os.path.join(ARCHIVE_DIR, os.path.basename(input_file))
+    shutil.move(input_file, archive_path)
+    print(f"SUCCESS: File archived to {archive_path}")
 
     # Log info in task logs
     print("Writer output:", writer_info)
@@ -131,19 +146,34 @@ def validate_and_process(**context) -> None:
 # --- DAG and Task Definitions ---
 def poll_for_csv(**context):
     """
-    Polls the input directory for any .csv file. If none found, raises an exception to retry on next DAG run.
+    Polls the input directory for any .csv file.
+    If none found, skips downstream tasks (not an error - just nothing to process).
     """
-    poll_seconds = 60  # How long to poll in this run (max)
-    interval = 5       # How often to check (seconds)
+    print(f"Checking for CSV files in: {INPUT_DIR}")
+    
+    # Check if directory exists
+    if not os.path.exists(INPUT_DIR):
+        print(f"WARNING: Input directory does not exist: {INPUT_DIR}")
+        raise AirflowSkipException("Input directory does not exist. Nothing to process.")
+    
+    # List all files in directory for debugging
+    all_files = os.listdir(INPUT_DIR)
+    print(f"All files in directory: {all_files}")
+    
+    poll_seconds = 10  # Reduced from 60 to avoid long waits
+    interval = 2       # Check every 2 seconds
     waited = 0
+    
     while waited < poll_seconds:
         files = glob.glob(os.path.join(INPUT_DIR, "*.csv"))
         if files:
-            # Found at least one .csv file, proceed
-            return
+            print(f"Found {len(files)} CSV file(s): {files}")
+            return  # Proceed to next task
         time.sleep(interval)
         waited += interval
-    raise FileNotFoundError("No CSV files found in input directory after polling.")
+    
+    print("No CSV files found in input directory. Skipping this run.")
+    raise AirflowSkipException("No CSV files to process. Will check again on next schedule.")
 
 with DAG(
     dag_id="amazon_pipeline",
