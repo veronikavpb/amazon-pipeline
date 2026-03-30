@@ -64,16 +64,12 @@ VALIDATION_RULES = {
         ]
     },
     "rating": {
-        "description": "Product rating (0-5 stars)",
-        "rules": [
-            {"type": "range", "min": 0, "max": 5, "message": "rating must be between 0 and 5"},
-        ]
+        "description": "Product rating (optional, processor handles invalid values)",
+        "rules": []
     },
     "rating_count": {
         "description": "Number of ratings (optional)",
-        "rules": [
-            {"type": "non_negative", "message": "rating_count must be >= 0 if present"},
-        ]
+        "rules": []
     },
     "review_content": {
         "description": "Review text content (optional, no length limit)",
@@ -218,26 +214,12 @@ class Validator:
                                          clean_text(row.get("discount_percentage"))))
 
         # --- rating ---
-        # Allow non-numeric or missing values - processor will coerce to null
-        r_txt = clean_text(row.get("rating"))
-        if r_txt:  # Only validate if present and non-empty
-            try:
-                r = float(r_txt)
-                if r < 0 or r > 5:
-                    issues.append(ValidationIssue(i, "rating", "range", 
-                                                 "rating must be between 0 and 5", r_txt))
-            except ValueError:
-                # Invalid format - let processor handle it
-                pass
+        # Allow missing or invalid values, processor will convert them to null
+        pass
 
         # --- rating_count ---
-        # Optional field - only validate if present and parseable
-        rc_raw = row.get("rating_count")
-        if pd.notna(rc_raw) and clean_text(rc_raw):  # Only check if not empty
-            rc = parse_int(rc_raw)
-            if rc is not None and rc < 0:
-                issues.append(ValidationIssue(i, "rating_count", "non_negative", 
-                                             "rating_count must be >= 0", str(rc)))
+        # Optional field, no strict validation
+        pass
 
         # --- review_content (optional field, no validation needed) ---
         # No length restrictions - accept any review content
