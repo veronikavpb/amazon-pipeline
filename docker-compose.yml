@@ -5,7 +5,7 @@ services:
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
       - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=False
       - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
-      # Azure connection string (loaded from .env file)
+      - PYTHONPATH=/opt/airflow
       - AZURE_STORAGE_CONNECTION_STRING=${AZURE_STORAGE_CONNECTION_STRING}
       - AZURE_CONTAINER_NAME=${AZURE_CONTAINER_NAME}
       - AZURE_BLOB_PREFIX=${AZURE_BLOB_PREFIX}
@@ -18,8 +18,13 @@ services:
     command: >
       bash -c "
       pip install pandas azure-storage-blob python-dotenv &&
-      airflow db init &&
-      airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com ||
-      true &&
-      airflow webserver & airflow scheduler
+      airflow db migrate &&
+      airflow users create
+        --username admin
+        --password admin
+        --firstname Admin
+        --lastname User
+        --role Admin
+        --email admin@example.com || true &&
+      airflow scheduler & airflow webserver
       "
