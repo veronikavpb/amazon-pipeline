@@ -14,7 +14,6 @@ from dotenv import load_dotenv
 from src.reader import CSVReader
 from src.validator import Validator
 from src.processor import Processor
-from src.backup_validator import BackupValidator
 from src.writer import Writer
 
 
@@ -83,22 +82,6 @@ def validate_and_process(**context) -> None:
     # 3) Processor
     processor = Processor(dedup_subset=["product_id"])
     df_clean = processor.process(df)
-
-    # 3.5) Backup Validator - validates the processed data
-    backup_validator = BackupValidator()
-    backup_issues = backup_validator.validate(df_clean)
-
-    if backup_issues:
-        # Write backup validation log
-        log_name = os.path.basename(input_file).replace(".csv", "_backup_validation_errors.csv")
-        log_path = os.path.join(ERROR_DIR, log_name)
-
-        pd.DataFrame([i.to_dict() for i in backup_issues]).to_csv(log_path, index=False)
-
-        # Move processed file to error folder (processing failed validation)
-        shutil.move(input_file, os.path.join(ERROR_DIR, os.path.basename(input_file)))
-
-        raise ValueError(f"Backup validation failed. Processing created invalid data. Log: {log_path}")
 
     # Push cleaned df to XCom? (Not recommended: too big)
     # Instead: write output now in the same task, or write a temp file path.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Dict, Any, Callable
 import pandas as pd
 
 from src.utils import (
@@ -11,6 +12,84 @@ from src.utils import (
     parse_percent,
     parse_int,
 )
+
+
+# ============================================================================
+# EXPLICIT VALIDATION RULES FOR EACH COLUMN
+# ============================================================================
+# This configuration clearly documents what validation rules apply to each column
+# making the data quality requirements visible and maintainable.
+# ============================================================================
+
+VALIDATION_RULES = {
+    "product_id": {
+        "description": "Amazon ASIN product identifier",
+        "rules": [
+            {"type": "not_empty", "message": "product_id cannot be empty"},
+            {"type": "asin_format", "message": "product_id must be valid 10-character ASIN format"},
+        ]
+    },
+    "product_name": {
+        "description": "Product name/title",
+        "rules": [
+            {"type": "min_length", "value": 3, "message": "product_name must be at least 3 characters"},
+            {"type": "max_length", "value": 500, "message": "product_name cannot exceed 500 characters"},
+        ]
+    },
+    "category": {
+        "description": "Product category",
+        "rules": [
+            {"type": "not_empty", "message": "category cannot be empty"},
+            {"type": "max_length", "value": 200, "message": "category cannot exceed 200 characters"},
+        ]
+    },
+    "discounted_price": {
+        "description": "Current selling price",
+        "rules": [
+            {"type": "money_positive", "message": "discounted_price must be a positive amount"},
+            {"type": "max_value", "value": 1000000, "message": "discounted_price seems unreasonably high"},
+        ]
+    },
+    "actual_price": {
+        "description": "Original/list price",
+        "rules": [
+            {"type": "money_positive", "message": "actual_price must be a positive amount"},
+            {"type": "max_value", "value": 1000000, "message": "actual_price seems unreasonably high"},
+        ]
+    },
+    "discount_percentage": {
+        "description": "Discount percentage (0-100)",
+        "rules": [
+            {"type": "range", "min": 0, "max": 100, "message": "discount_percentage must be between 0 and 100"},
+        ]
+    },
+    "rating": {
+        "description": "Product rating (0-5 stars)",
+        "rules": [
+            {"type": "range", "min": 0, "max": 5, "message": "rating must be between 0 and 5"},
+        ]
+    },
+    "rating_count": {
+        "description": "Number of ratings",
+        "rules": [
+            {"type": "non_negative", "message": "rating_count must be >= 0"},
+            {"type": "integer", "message": "rating_count must be an integer"},
+        ]
+    },
+    "review_content": {
+        "description": "Review text content (optional)",
+        "rules": [
+            {"type": "max_length", "value": 10000, "message": "review_content exceeds maximum length"},
+        ]
+    },
+    "product_link": {
+        "description": "URL to product page",
+        "rules": [
+            {"type": "not_empty", "message": "product_link cannot be empty"},
+            {"type": "valid_url", "message": "product_link must be a valid HTTP(S) URL"},
+        ]
+    },
+}
 
 
 @dataclass

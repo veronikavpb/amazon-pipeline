@@ -8,12 +8,13 @@ from datetime import datetime
 import pandas as pd
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.sensors.filesystem import FileSensor
+import time
 from dotenv import load_dotenv
 
 from src.reader import CSVReader
 from src.validator import Validator
 from src.processor import Processor
+from src.backup_validator import BackupValidator
 from src.writer import Writer
 
 
@@ -83,6 +84,22 @@ def validate_and_process(**context) -> None:
     processor = Processor(dedup_subset=["product_id"])
     df_clean = processor.process(df)
 
+    # 3.5) Backup Validator - validates the processed data
+    backup_validator = BackupValidator()
+    backup_issues = backup_validator.validate(df_clean)
+
+    if backup_issues:
+        # Write backup validation log
+        log_name = os.path.basename(input_file).replace(".csv", "_backup_validation_errors.csv")
+        log_path = os.path.join(ERROR_DIR, log_name)
+
+        pd.DataFrame([i.to_dict() for i in backup_issues]).to_csv(log_path, index=False)
+
+        # Move processed file to error folder (processing failed validation)
+        shutil.move(input_file, os.path.join(ERROR_DIR, os.path.basename(input_file)))
+
+        raise ValueError(f"Backup validation failed. Processing created invalid data. Log: {log_path}")
+
     # Push cleaned df to XCom? (Not recommended: too big)
     # Instead: write output now in the same task, or write a temp file path.
     # We'll write output here and pass the output path forward.
@@ -111,6 +128,23 @@ def validate_and_process(**context) -> None:
     print("Writer output:", writer_info)
 
 
+# --- DAG and Task Definitions ---
+def poll_for_csv(**context):
+    """
+    Polls the input directory for any .csv file. If none found, raises an exception to retry on next DAG run.
+    """
+    poll_seconds = 60  # How long to poll in this run (max)
+    interval = 5       # How often to check (seconds)
+    waited = 0
+    while waited < poll_seconds:
+        files = glob.glob(os.path.join(INPUT_DIR, "*.csv"))
+        if files:
+            # Found at least one .csv file, proceed
+            return
+        time.sleep(interval)
+        waited += interval
+    raise FileNotFoundError("No CSV files found in input directory after polling.")
+
 with DAG(
     dag_id="amazon_pipeline",
     start_date=datetime(2025, 1, 1),
@@ -118,16 +152,9 @@ with DAG(
     catchup=False,
     default_args={"retries": 0},
 ) as dag:
-
-    wait_for_csv = FileSensor(
-        task_id="wait_for_csv",
-        # This filepath is relative to Airflow's "base" for FileSensor in some setups.
-        # Many class setups configure it to /opt/airflow/ - but to avoid issues, we use a dedicated "poke" function.
-        # If your FileSensor doesn't support wildcards reliably, we keep it simple:
-        filepath="data/input",   # expects your airflow base folder includes /opt/airflow/data
-        poke_interval=20,
-        timeout=60,
-        mode="poke",
+    poll_csv = PythonOperator(
+        task_id="poll_for_csv",
+        python_callable=poll_for_csv,
     )
 
     choose_file = PythonOperator(
@@ -140,4 +167,4 @@ with DAG(
         python_callable=validate_and_process,
     )
 
-    wait_for_csv >> choose_file >> run_pipeline
+    poll_csv >> choose_file >> run_pipeline

@@ -85,11 +85,11 @@ class Processor:
         else:
             out["category_level1"] = "Unknown"
 
-        # NEW COLUMN 4: has_discount_flag
+        # NEW COLUMN 4: has_discount_flag (BONUS)
         # Purpose: Boolean flag for filtering discounted products
         out["has_discount_flag"] = out["discount_amount"] > 0
 
-        # NEW COLUMN 5: price_quality_score
+        # NEW COLUMN 5: price_quality_score (BONUS)
         # Purpose: Weighted rating score (rating * log(rating_count + 1))
         # This gives more weight to products with more reviews
         out["price_quality_score"] = out.apply(

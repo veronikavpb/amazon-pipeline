@@ -2,7 +2,6 @@
 .env
 .env/
 .venv/
-docker-compose.yml
 
 # Python
 __pycache__/
@@ -16,10 +15,9 @@ data/error/
 data/archive/
 azurite_data/
 
-# IDE and history
+# IDE
 .vscode/
 .idea/
-.history/
 *.swp
 *.swo
 
